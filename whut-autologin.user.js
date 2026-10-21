@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WHUT 校园网自动登录
 // @namespace    whut-autologin
-// @version      1.1
+// @version      1.2
 // @description  打开 WHUT 校园网认证页时自动填账号密码并登录；失败停止重试并提示；成功后 1 秒自动关闭标签页
 // @match        http://172.30.21.100/tpl/whut/login.html*
 // @grant        none
@@ -69,7 +69,17 @@
     };
 
     // ---------- 以下要等 DOM 就绪 ----------
-    document.addEventListener('DOMContentLoaded', function () {
+    // 竞态防护：Tampermonkey 注入偶发延迟（冷启动标签页），DOM 事件可能已经错过，
+    // 所以 readyState 已过 loading 就直接执行，否则挂 DOMContentLoaded
+    function onReady(fn) {
+        if (document.readyState !== 'loading') {
+            fn();
+        } else {
+            document.addEventListener('DOMContentLoaded', fn);
+        }
+    }
+
+    onReady(function () {
 
         // 接力：登录成功后页面会自己重载回 login.html
         if (sessionStorage.getItem(FLAG_SUCCESS)) {
@@ -80,19 +90,19 @@
             return;
         }
 
-        // 断网被强制跳过来时才自动登录：先查在线状态，已在线就不折腾
+        // 先查在线状态（服务器按 IP 识别，token 为空也能查到）：已在线只显示横幅，不再登录
         var token = localStorage.getItem('token');
-        if (token) {
-            fetch('/api/account/status?token=' + encodeURIComponent(token))
-                .then(function (res) { return res.json(); })
-                .then(function (r) {
-                    if (r.code === 0) return; // 已经在线，什么都不做
-                    tryAutoLogin();
-                })
-                .catch(tryAutoLogin);
-        } else {
-            tryAutoLogin();
-        }
+        fetch('/api/account/status?token=' + encodeURIComponent(token || ''))
+            .then(function (res) { return res.json(); })
+            .then(function (r) {
+                if (r.code === 0) {
+                    var who = (r.online && (r.online.Name || r.online.Username)) || MY_USERNAME;
+                    banner('当前已在线（' + who + '），无需登录', '#1a9c48');
+                    return;
+                }
+                tryAutoLogin();
+            })
+            .catch(tryAutoLogin);
 
         function tryAutoLogin() {
             if (sessionStorage.getItem(FLAG_STOP)) {
